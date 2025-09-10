@@ -1,5 +1,5 @@
 // ProductService.js
-const API_URL = "http://localhost:8000/products/";
+const API_URL = "http://localhost:8001/products/";
 
 export async function fetchProducts() {
   const res = await fetch(API_URL);
@@ -33,4 +33,18 @@ export async function updateProduct(id, product) {
   });
   if (!res.ok) throw new Error("Failed to update product");
   return res.json();
+}
+
+export async function canDeleteProduct(id) {
+  try {
+    const res = await fetch(`${API_URL}${id}/can-delete`);
+    if (!res.ok) {
+      const error = await res.text();
+      throw new Error(`Failed to check if product can be deleted: ${res.status} - ${error}`);
+    }
+    return res.json();
+  } catch (error) {
+    console.error('Error in canDeleteProduct:', error);
+    throw error;
+  }
 }

@@ -3,7 +3,7 @@ import React from 'react';
 
 
 
-const ProductList = ({ products, onView, onEdit, onDelete }) => (
+const ProductList = ({ products, onView, onEdit, onDelete, onAddToCart, productsCanDelete = {} }) => (
   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
     {products.map(product => (
       <div key={product.id} className="bg-white rounded-[12.75px] shadow-lg border border-[rgba(0,0,0,0.1)] p-6 flex flex-col">
@@ -31,11 +31,38 @@ const ProductList = ({ products, onView, onEdit, onDelete }) => (
             Edit
           </button>
           <button
-            className="inline-flex items-center bg-[#D4183D] text-white rounded-[6.75px] px-4 py-1 text-xs font-medium shadow hover:bg-red-700 transition"
-            onClick={() => onDelete(product)}
+            className={`inline-flex items-center rounded-[6.75px] px-4 py-1 text-xs font-medium shadow transition ${
+              productsCanDelete[product.id] === false
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-[#D4183D] text-white hover:bg-red-700'
+            }`}
+            onClick={() => {
+              if (productsCanDelete[product.id] !== false) {
+                onDelete(product);
+              }
+            }}
+            disabled={productsCanDelete[product.id] === false}
+            title={productsCanDelete[product.id] === false ? 'Cannot delete - product is in shopping cart' : 'Delete product'}
           >
-            <svg className="mr-1" width="14" height="14" fill="none" stroke="#fff" strokeWidth="1.2" viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>
+            <svg className="mr-1" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.2" viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>
             Delete
+          </button>
+          {/* Add to Cart button */}
+          <button
+            className={`inline-flex items-center rounded-[6.75px] px-4 py-1 text-xs font-medium shadow transition ${
+              product.stock > 0
+                ? 'bg-green-600 text-white hover:bg-green-700'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            }`}
+            onClick={() => product.stock > 0 && onAddToCart(product)}
+            disabled={product.stock === 0}
+            title={product.stock === 0 ? 'Out of stock' : 'Add to cart'}
+          >
+            <svg className="mr-1" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.2" viewBox="0 0 24 24">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            Add to Cart
           </button>
         </div>
       </div>

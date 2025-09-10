@@ -7,7 +7,9 @@ import Modal from './components/Modal.jsx';
 import ProductDetailsDialog from './components/ProductDetailsDialog.jsx';
 import EditProductDialog from './components/EditProductDialog.jsx';
 import DeleteProductDialog from './components/DeleteProductDialog.jsx';
-import { fetchProducts, addProduct, updateProduct, deleteProduct } from './services/ProductService.js';
+import ShoppingCart from './components/ShoppingCart.jsx';
+import { fetchProducts, addProduct, updateProduct, deleteProduct, canDeleteProduct } from './services/ProductService.js';
+import { addToCart, getCart, removeFromCart, updateCartItem } from './services/CartService.js';
 
 
 function App() {
@@ -21,12 +23,76 @@ function App() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [search, setSearch] = useState("");
 
+  // Cart state
+  const [cart, setCart] = useState(null);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [productsCanDelete, setProductsCanDelete] = useState({});
+
   useEffect(() => {
     fetchProducts()
       .then(setProducts)
       .catch(setError)
       .finally(() => setLoading(false));
+
+    // Load cart on component mount
+    loadCart();
   }, []);
+
+  // Check delete permissions when products change
+  useEffect(() => {
+    if (products.length > 0) {
+      checkDeletePermissions();
+    }
+  }, [products]);
+
+  const loadCart = async () => {
+    try {
+      const cartData = await getCart();
+      setCart(cartData);
+      // Update delete permissions when cart changes
+      await checkDeletePermissions();
+    } catch (err) {
+      // If cart doesn't exist yet, initialize empty cart
+      setCart({ items: [], total_items: 0, total_price: 0 });
+    }
+  };
+
+  const checkDeletePermissions = async () => {
+    if (products.length === 0) return;
+
+    console.log('Checking delete permissions for products:', products.map(p => p.id));
+
+    try {
+      const deletePermissions = {};
+      // Process products in smaller batches to avoid overwhelming the API
+      for (let i = 0; i < products.length; i++) {
+        const product = products[i];
+        try {
+          const result = await canDeleteProduct(product.id);
+          deletePermissions[product.id] = result.can_delete;
+          console.log(`Product ${product.id} can delete:`, result.can_delete);
+        } catch (err) {
+          console.warn(`Failed to check delete permission for product ${product.id}:`, err.message);
+          // Default to allowing delete if check fails to avoid blocking UI
+          deletePermissions[product.id] = true;
+        }
+        // Add small delay to avoid rate limiting
+        if (i < products.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      }
+      console.log('Final delete permissions:', deletePermissions);
+      setProductsCanDelete(deletePermissions);
+    } catch (err) {
+      console.error('Failed to check delete permissions:', err);
+      // Set all products as deletable if batch check fails
+      const fallbackPermissions = {};
+      products.forEach(product => {
+        fallbackPermissions[product.id] = true;
+      });
+      setProductsCanDelete(fallbackPermissions);
+    }
+  };
 
   const handleAddProduct = async (product) => {
     try {
@@ -48,9 +114,24 @@ function App() {
     setSelectedProduct({ ...product });
     setShowEdit(true);
   };
-  const handleDelete = (product) => {
-    setSelectedProduct(product);
-    setShowDelete(true);
+  const handleDelete = async (product) => {
+    try {
+      const result = await canDeleteProduct(product.id);
+      if (!result || !result.can_delete) {
+        const cartCount = result ? result.cart_count : 'unknown';
+        setError(`Cannot delete "${product.name}" because it is currently in ${cartCount} shopping cart(s). Please remove it from all carts first.`);
+        return;
+      }
+      // If we can delete, proceed to show delete dialog
+      setSelectedProduct(product);
+      setShowDelete(true);
+    } catch (err) {
+      console.error('Error checking delete permission:', err);
+      // If check fails, show a more generic error but still allow attempting deletion
+      // The backend will handle the final validation
+      setSelectedProduct(product);
+      setShowDelete(true);
+    }
   };
   const handleEditProduct = async (updatedProduct) => {
     try {
@@ -66,6 +147,46 @@ function App() {
       await deleteProduct(product.id);
       setProducts(products.filter(p => p.id !== product.id));
       setShowDelete(false);
+      // Refresh delete permissions after successful deletion
+      await checkDeletePermissions();
+    } catch (err) {
+      // Handle backend validation errors (like product in cart)
+      if (err.message.includes('shopping cart')) {
+        setError(err.message);
+      } else {
+        setError(`Failed to delete product: ${err.message}`);
+      }
+    }
+  };
+
+  // Cart handlers
+  const handleAddToCart = async (product) => {
+    try {
+      await addToCart(product.id, 1);
+      await loadCart(); // Refresh cart and delete permissions
+      // Show a brief success message or animation
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleRemoveFromCart = async (productId) => {
+    try {
+      await removeFromCart(productId);
+      await loadCart(); // Refresh cart and delete permissions
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleUpdateCartQuantity = async (productId, quantity) => {
+    try {
+      if (quantity <= 0) {
+        await removeFromCart(productId);
+      } else {
+        await updateCartItem(productId, quantity);
+      }
+      await loadCart(); // Refresh cart and delete permissions
     } catch (err) {
       setError(err.message);
     }
@@ -104,7 +225,17 @@ function App() {
             </button>
           </div>
         </div>
-        {error && <div className="bg-red-100 text-red-700 p-2 mb-4 rounded">{typeof error === 'string' ? error : error?.message}</div>}
+        {error && (
+          <div className="bg-red-100 text-red-700 p-2 mb-4 rounded flex items-center justify-between">
+            <span>{typeof error === 'string' ? error : error?.message}</span>
+            <button
+              onClick={() => setError(null)}
+              className="ml-2 text-red-700 hover:text-red-900 font-bold text-lg leading-none"
+            >
+              ×
+            </button>
+          </div>
+        )}
         <Modal open={showAdd} onClose={() => setShowAdd(false)}>
           <h2 className="text-lg font-semibold mb-4 text-[#000]">Add New Product</h2>
           <ProductForm onAdd={handleAddProduct} />
@@ -115,8 +246,24 @@ function App() {
         {loading ? (
           <div className="text-center text-gray-500">Loading...</div>
         ) : (
-          <ProductList products={filteredProducts} onView={handleView} onEdit={handleEdit} onDelete={handleDelete} />
+          <ProductList
+            products={filteredProducts}
+            onView={handleView}
+            onEdit={handleEdit}
+            onDelete={handleDelete}
+            onAddToCart={handleAddToCart}
+            productsCanDelete={productsCanDelete}
+          />
         )}
+
+        {/* Shopping Cart */}
+        <ShoppingCart
+          cart={cart}
+          isOpen={cartOpen}
+          onToggle={() => setCartOpen(!cartOpen)}
+          onRemoveItem={handleRemoveFromCart}
+          onUpdateQuantity={handleUpdateCartQuantity}
+        />
       </div>
     </div>
   );
